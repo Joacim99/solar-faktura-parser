@@ -25,7 +25,7 @@ if uploaded_file is not None:
                     if text:
                         full_text += text + "\n\n"
 
-            # Debug: Vis ekstrahert tekst (kan fjernes senere hvis du vil)
+            # Debug: Vis ekstrahert tekst
             st.subheader("Ekstrahert tekst fra PDF (første 6000 tegn)")
             st.text(full_text[:6000] + "..." if len(full_text) > 6000 else full_text)
 
@@ -74,14 +74,40 @@ if uploaded_file is not None:
                     }
                     continue
 
-                # Legg til ekstra info til beskrivelse
-                if current and (line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line or "Baskvantitet:" in line):
-                    current["Beskrivelse"] += " " + line.strip()
+                if current:
+                    # Legg til ekstra info til beskrivelse
+                    if line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line or "Baskvantitet:" in line:
+                        current["Beskrivelse"] += " " + line.strip()
+
+                    # Fallback antall/enhet i ekstra linjer (f.eks. Baskvantitet)
+                    if current["Antall"] is None:
+                        antall_matches = re.findall(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?', line, re.I)
+                        if antall_matches:
+                            for amt, unit in reversed(antall_matches):
+                                try:
+                                    amt_float = float(amt.replace(",", "."))
+                                    if 0.1 < amt_float < 10000:
+                                        current["Antall"] = amt_float
+                                        if unit:
+                                            current["Enhet"] = unit.lower()
+                                        break
+                                except:
+                                    pass
+
+                    # Fallback nettobeløp
+                    if current["Nettobeløp"] is None:
+                        netto_match = re.search(r'([\d\s,.]+)\s*NOK', line)
+                        if netto_match:
+                            val = netto_match.group(1).replace(" ", "").replace(",", ".")
+                            try:
+                                current["Nettobeløp"] = float(val)
+                            except:
+                                pass
 
             if current:
                 items.append(current)
 
-            # Lag resultat-tabell
+            # Lag resultat-tabell med pen formatering
             result = []
             for item in items:
                 if item["Antall"] is not None and item["Nettobeløp"] is not None and item["Antall"] > 0:
@@ -90,7 +116,7 @@ if uploaded_file is not None:
                         "Nr": item["Nr"],
                         "Artikkelnr": item["Artikkelnr"],
                         "Beskrivelse": item["Beskrivelse"].strip()[:150] + "..." if len(item["Beskrivelse"]) > 150 else item["Beskrivelse"].strip(),
-                        "Antall": f"{item['Antall']:.2f}",  # Pen formatering (2 desimaler)
+                        "Antall": f"{item['Antall']:.2f}",  # Pen visning: 8,00
                         "Enhet": item["Enhet"],
                         "Nettobeløp": f"{item['Nettobeløp']:.2f} NOK",
                         "Pris per enhet": f"{pris:.2f} NOK/{item['Enhet']}"
