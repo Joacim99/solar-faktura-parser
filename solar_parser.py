@@ -8,7 +8,7 @@ st.set_page_config(page_title="Solar Faktura Parser (PDF)", layout="wide")
 
 st.title("Solar Faktura – Pris per enhet (PDF)")
 st.markdown("""
-Last opp Solar PDF-faktura. Appen parser teksten og finner alle varer med riktig antall og nettobeløp.
+Last opp Solar PDF-faktura. Appen parser teksten og finner varer med riktig antall og nettobeløp.
 """)
 
 uploaded_file = st.file_uploader("Velg PDF-fil", type=["pdf"])
@@ -35,63 +35,36 @@ if uploaded_file is not None:
             current = None
 
             for line in lines:
-                # Ny varelinje: starter med "1 " eller "2 " osv. etterfulgt av artikkelnr
-                nr_art_match = re.match(r'^(\d+)\s+(\d+)\s+(.*)', line)
-                if nr_art_match:
+                # Ny varelinje: Nr + Artikkelnr + beskrivelse + antall + enhet + a-pris + mva + netto NOK
+                # Fleksibel nok til å matche både "8,00 m" og "5,00 each"
+                match = re.match(r'^(\d+)\s+(\d+)\s+(.+?)\s+(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?\s+(\d+[.,]?\d*)\s+25,00 %\s+([\d\s,.]+)\s*NOK', line, re.I)
+                if match:
                     if current:
                         items.append(current)
 
-                    nr = nr_art_match.group(1)
-                    artnr = nr_art_match.group(2)
-                    rest = nr_art_match.group(3).strip()
+                    nr = match.group(1)
+                    artnr = match.group(2)
+                    desc = match.group(3).strip()
+                    antall_str = match.group(4).replace(",", ".")
+                    antall = float(antall_str)
+                    enhet = match.group(5).lower() if match.group(5) else "?"
+                    a_pris = match.group(6)
+                    netto_str = match.group(7).replace(" ", "").replace(",", ".")
+                    netto = float(netto_str)
 
                     current = {
                         "Nr": nr,
                         "Artikkelnr": artnr,
-                        "Beskrivelse": rest,
-                        "Antall": None,
-                        "Enhet": "?",
-                        "Nettobeløp": None
+                        "Beskrivelse": desc,
+                        "Antall": antall,
+                        "Enhet": enhet,
+                        "Nettobeløp": netto
                     }
-
-                    # Prøv å finne antall/enhet i samme linje (vanlig mønster)
-                    antall_match = re.search(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)\b', rest, re.I)
-                    if antall_match:
-                        current["Antall"] = float(antall_match.group(1).replace(",", "."))
-                        current["Enhet"] = antall_match.group(2).lower()
-
-                    # Nettobeløp i samme linje
-                    netto_match = re.search(r'([\d\s,.]+)\s*NOK', rest)
-                    if netto_match:
-                        val = netto_match.group(1).replace(" ", "").replace(",", ".")
-                        try:
-                            current["Nettobeløp"] = float(val)
-                        except:
-                            pass
-
                     continue
 
-                if current:
-                    # Legg til ekstra info til beskrivelse
-                    if line.startswith(("Rabatt:", "Standard ID:", "Ordrelinjenummer:", "Baskvantitet:")):
-                        current["Beskrivelse"] += " " + line.strip()
-
-                    # Fallback: søk antall/enhet i ekstra linjer
-                    if current["Antall"] is None:
-                        antall_match = re.search(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)\b', line, re.I)
-                        if antall_match:
-                            current["Antall"] = float(antall_match.group(1).replace(",", "."))
-                            current["Enhet"] = antall_match.group(2).lower()
-
-                    # Fallback nettobeløp
-                    if current["Nettobeløp"] is None:
-                        netto_match = re.search(r'([\d\s,.]+)\s*NOK', line)
-                        if netto_match:
-                            val = netto_match.group(1).replace(" ", "").replace(",", ".")
-                            try:
-                                current["Nettobeløp"] = float(val)
-                            except:
-                                pass
+                # Legg til ekstra info (rabatt, ID, ordrelinje, baskvantitet) til beskrivelse
+                if current and (line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line or "Baskvantitet:" in line):
+                    current["Beskrivelse"] += " " + line.strip()
 
             if current:
                 items.append(current)
@@ -128,4 +101,4 @@ if uploaded_file is not None:
             st.error(f"Feil under behandling: {str(e)}")
             st.info("Prøv på nytt eller send feilmeldingen.")
 
-st.caption("PDF-parser – tekstbasert, tilpasset Solar-struktur • Hele fila sendes hver gang")
+st.caption("PDF-parser – tilpasset Solar-struktur • Hele fila sendes hver gang")
