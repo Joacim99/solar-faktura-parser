@@ -49,6 +49,7 @@ if uploaded_file is not None:
                     continue
 
                 # Matcher varelinje: Nr + Artikkelnr + beskrivelse + antall + enhet + a-pris + mva + netto NOK
+                # Fleksibel nok til å matche variasjoner
                 match = re.match(r'^(\d+)\s+(\d+)\s+(.+?)\s+(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?\s+(\d+[.,]?\d*)\s+25,00 %\s+([\d\s,.]+)\s*NOK', line, re.I | re.DOTALL)
                 if match:
                     if current:
@@ -79,7 +80,7 @@ if uploaded_file is not None:
                     if line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line or "Baskvantitet:" in line:
                         current["Beskrivelse"] += " " + line.strip()
 
-                    # Fallback antall/enhet i ekstra linjer (f.eks. Baskvantitet)
+                    # Fallback antall/enhet i ekstra linjer
                     if current["Antall"] is None:
                         antall_matches = re.findall(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?', line, re.I)
                         if antall_matches:
@@ -116,7 +117,7 @@ if uploaded_file is not None:
                         "Nr": item["Nr"],
                         "Artikkelnr": item["Artikkelnr"],
                         "Beskrivelse": item["Beskrivelse"].strip()[:150] + "..." if len(item["Beskrivelse"]) > 150 else item["Beskrivelse"].strip(),
-                        "Antall": f"{item['Antall']:.2f}",  # Pen visning: 8,00
+                        "Antall": f"{item['Antall']:.2f}",
                         "Enhet": item["Enhet"],
                         "Nettobeløp": f"{item['Nettobeløp']:.2f} NOK",
                         "Pris per enhet": f"{pris:.2f} NOK/{item['Enhet']}"
