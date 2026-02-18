@@ -8,7 +8,7 @@ st.set_page_config(page_title="Solar Faktura Parser (PDF)", layout="wide")
 
 st.title("Solar Faktura – Pris per enhet (PDF)")
 st.markdown("""
-Last opp Solar PDF-faktura. Appen parser teksten og finner alle varer med riktig antall og nettobeløp.
+Last opp Solar PDF-faktura. Appen parser teksten og finner varer med riktig antall og nettobeløp.
 """)
 
 uploaded_file = st.file_uploader("Velg PDF-fil", type=["pdf"])
