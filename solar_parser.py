@@ -8,123 +8,105 @@ st.set_page_config(page_title="Solar Faktura Parser (PDF)", layout="wide")
 
 st.title("Solar Faktura – Pris per enhet (PDF)")
 st.markdown("""
-Last opp Solar-faktura som PDF. Appen ekstraherer tabeller og regner ut pris per enhet (nettobeløp ÷ antall).
+Last opp Solar-faktura som PDF. Appen leser teksten og finner varer, antall, nettobeløp og regner ut pris per enhet.
 """)
 
 uploaded_file = st.file_uploader("Velg PDF-fil", type=["pdf"])
 
 if uploaded_file is not None:
-    with st.spinner("Behandler PDF..."):
+    with st.spinner("Leser PDF og parser tekst..."):
         try:
             pdf_bytes = BytesIO(uploaded_file.read())
-            all_tables = []
+            full_text = ""
 
             with pdfplumber.open(pdf_bytes) as pdf:
                 for page in pdf.pages:
-                    tables = page.extract_tables()
-                    if tables:
-                        for table in tables:
-                            header = table[0] if table else None
-                            df_table = pd.DataFrame(table[1:], columns=header)
-                            all_tables.append(df_table)
+                    text = page.extract_text()
+                    if text:
+                        full_text += text + "\n\n"
 
-            if not all_tables:
-                st.warning("Ingen tabeller funnet i PDF-en. Filen kan være bildebasert eller ha uvanlig layout.")
-            else:
-                df_raw = pd.concat(all_tables, ignore_index=True).fillna("")
+            # Debug: Vis ekstrahert tekst (første del)
+            st.subheader("Ekstrahert tekst fra PDF (første 2000 tegn – for feilsøking)")
+            st.text(full_text[:2000] + "..." if len(full_text) > 2000 else full_text)
 
-                # Debug: Vis rådata for å se hva pdfplumber fanger
-                st.subheader("Rå ekstrahert tabell (debug)")
-                st.dataframe(df_raw.head(20))
+            # Split i linjer
+            lines = [line.strip() for line in full_text.splitlines() if line.strip()]
 
-                # Normaliser kolonner – ofte er de numeriske eller None
-                if all(isinstance(c, int) or c is None for c in df_raw.columns):
-                    cols = ["Nr", "Artikkelnr", "Beskrivelse", "Antall", "Enhet", "A-pris", "MVA-sats", "Nettobeløp"]
-                    df_raw.columns = cols[:len(df_raw.columns)]
+            items = []
+            current = None
 
-                # Rense antall og nettobeløp-kolonner
-                for col in ["Antall", "Nettobeløp"]:
-                    if col in df_raw.columns:
-                        df_raw[col] = df_raw[col].astype(str).str.replace(r'[^\d.,]', '', regex=True).str.replace(",", ".").replace("", float("nan"))
-                        df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce')
-
-                # ------------------------------------------------------
-                # Forbedret parsing: Loop gjennom rader og samle data
-                # ------------------------------------------------------
-                items = []
-                current = None
-
-                for _, row in df_raw.iterrows():
-                    nr = str(row.get("Nr", "")).strip()
-                    if re.match(r'^\d+$', nr):
-                        if current:
-                            items.append(current)
-                        current = {
-                            "Nr": nr,
-                            "Beskrivelse": str(row.get("Beskrivelse", "")).strip(),
-                            "Antall": None,
-                            "Enhet": str(row.get("Enhet", "?")).strip(),
-                            "Nettobeløp": None
-                        }
-
-                        # Hent antall og netto direkte fra kolonner hvis de finnes
-                        antall_val = row.get("Antall")
-                        if pd.notna(antall_val):
-                            current["Antall"] = antall_val
-
-                        netto_val = row.get("Nettobeløp")
-                        if pd.notna(netto_val):
-                            current["Nettobeløp"] = netto_val
-
+            for line in lines:
+                # Ny varelinje starter med "1 ", "2 ", "3 " osv.
+                nr_match = re.match(r'^(\d+)\s', line)
+                if nr_match:
                     if current:
-                        # Fallback regex hvis kolonner ikke traff
-                        row_text = " ".join(str(v) for v in row if pd.notna(v))
-                        if current["Antall"] is None:
-                            antall_match = re.search(r'(\d+[.,]?\d*)\s*(m|each|stk|roll)?', row_text, re.I)
-                            if antall_match:
-                                current["Antall"] = float(antall_match.group(1).replace(",", "."))
-                                if antall_match.group(2):
-                                    current["Enhet"] = antall_match.group(2).lower()
-
-                        if current["Nettobeløp"] is None:
-                            netto_match = re.search(r'([\d\s,.]+)\s*NOK', row_text)
-                            if netto_match:
-                                val = netto_match.group(1).replace(" ", "").replace(",", ".")
-                                current["Nettobeløp"] = float(val)
+                        items.append(current)
+                    current = {
+                        "Nr": nr_match.group(1),
+                        "Beskrivelse": "",
+                        "Antall": None,
+                        "Enhet": "?",
+                        "Nettobeløp": None
+                    }
+                    # Beskrivelse starter ofte rett etter Nr
+                    desc_part = line[nr_match.end():].strip()
+                    if desc_part:
+                        current["Beskrivelse"] = desc_part
 
                 if current:
-                    items.append(current)
+                    # Legg til mer beskrivelse hvis linjen ikke starter med tall eller NOK
+                    if not re.match(r'^\d', line) and "NOK" not in line:
+                        current["Beskrivelse"] += " " + line.strip()
 
-                # Filtrer og beregn pris per enhet
-                result = []
-                for item in items:
-                    if item["Antall"] and item["Nettobeløp"] and item["Antall"] > 0:
-                        pris = round(item["Nettobeløp"] / item["Antall"], 2)
-                        result.append({
-                            "Nr": item["Nr"],
-                            "Beskrivelse": item["Beskrivelse"][:100] + "..." if len(item["Beskrivelse"]) > 100 else item["Beskrivelse"],
-                            "Antall": item["Antall"],
-                            "Enhet": item["Enhet"],
-                            "Nettobeløp": item["Nettobeløp"],
-                            "Pris per enhet": pris
-                        })
+                    # Antall + enhet
+                    antall_match = re.search(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?', line, re.I)
+                    if antall_match and current["Antall"] is None:
+                        current["Antall"] = float(antall_match.group(1).replace(",", "."))
+                        if antall_match.group(2):
+                            current["Enhet"] = antall_match.group(2).lower()
 
-                if result:
-                    df_result = pd.DataFrame(result)
-                    st.success(f"Fant {len(df_result)} varelinjer!")
-                    st.dataframe(df_result.style.format({
-                        "Nettobeløp": "{:,.2f} NOK",
-                        "Pris per enhet": "{:,.2f} NOK"
-                    }), use_container_width=True)
+                    # Nettobeløp
+                    netto_match = re.search(r'([\d\s,.]+)\s*NOK', line)
+                    if netto_match and current["Nettobeløp"] is None:
+                        val = netto_match.group(1).replace(" ", "").replace(",", ".")
+                        try:
+                            current["Nettobeløp"] = float(val)
+                        except ValueError:
+                            pass
 
-                    csv = df_result.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button("Last ned som CSV", csv, "solar_priser.csv", "text/csv")
-                else:
-                    st.warning("Ingen gyldige linjer funnet. Sjekk rå-tabellen over – kanskje kolonnene er feilplassert.")
+            if current:
+                items.append(current)
+
+            # Lag resultat
+            result = []
+            for item in items:
+                if item["Antall"] and item["Nettobeløp"] and item["Antall"] > 0:
+                    pris = round(item["Nettobeløp"] / item["Antall"], 2)
+                    result.append({
+                        "Nr": item["Nr"],
+                        "Beskrivelse": item["Beskrivelse"].strip()[:150] + "..." if len(item["Beskrivelse"]) > 150 else item["Beskrivelse"].strip(),
+                        "Antall": item["Antall"],
+                        "Enhet": item["Enhet"],
+                        "Nettobeløp": item["Nettobeløp"],
+                        "Pris per enhet": pris
+                    })
+
+            if result:
+                df_result = pd.DataFrame(result)
+                st.success(f"Fant {len(df_result)} varelinjer!")
+                st.dataframe(df_result.style.format({
+                    "Nettobeløp": "{:,.2f} NOK",
+                    "Pris per enhet": "{:,.2f} NOK"
+                }), use_container_width=True)
+
+                csv = df_result.to_csv(index=False).encode('utf-8-sig')
+                st.download_button("Last ned resultat som CSV", csv, "solar_priser.csv", "text/csv")
+            else:
+                st.warning("Fant ingen linjer med både antall og nettobeløp. Sjekk ekstrahert tekst over – kanskje mønsteret er annerledes i denne PDF-en.")
 
         except Exception as e:
             st.error(f"Feil under behandling: {str(e)}")
-            st.info("Prøv en annen PDF eller send feilmeldingen for hjelp.")
+            st.info("Prøv på nytt eller send feilmeldingen for hjelp.")
 
 st.markdown("---")
-st.caption("PDF-parser med pdfplumber • Oppdatert versjon")
+st.caption("Tekstbasert PDF-parser med pdfplumber • Oppdatert versjon – hele fila sendes hver gang")
