@@ -7,12 +7,14 @@ import pdfplumber
 st.set_page_config(page_title="Solar Faktura Parser (PDF)", layout="wide")
 
 st.title("Solar Faktura – Pris per enhet (PDF)")
-st.markdown("Last opp Solar PDF. Appen parser teksten direkte og finner varer med antall og nettobeløp.")
+st.markdown("""
+Last opp Solar PDF-faktura. Appen parser teksten og finner alle varer med riktig antall og nettobeløp.
+""")
 
 uploaded_file = st.file_uploader("Velg PDF-fil", type=["pdf"])
 
 if uploaded_file is not None:
-    with st.spinner("Leser og parser PDF-tekst..."):
+    with st.spinner("Leser PDF og parser tekst..."):
         try:
             pdf_bytes = BytesIO(uploaded_file.read())
             full_text = ""
@@ -33,7 +35,8 @@ if uploaded_file is not None:
             current = None
 
             for line in lines:
-                # Ny varelinje: starter med "1 " eller "2 " osv. etterfulgt av artikkelnr (6+ siffer)
+                # Ny varelinje: starter med "Nr" etterfulgt av artikkelnr og beskrivelse
+                # Eks: "1 1355221 KABELSTIGE KHZSP-200 4M 8,00 m 656,00 25,00 % 842,30 NOK FZS"
                 match = re.match(r'^(\d+)\s+(\d{6,})\s+(.+?)\s+(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?\s+(\d+[.,]?\d*)\s+25,00 %\s+([\d\s,.]+)\s*NOK', line, re.I)
                 if match:
                     if current:
@@ -46,7 +49,7 @@ if uploaded_file is not None:
                     enhet = match.group(5).lower() if match.group(5) else "?"
                     a_pris = match.group(6)
                     netto_str = match.group(7).replace(" ", "").replace(",", ".")
-                    netto = float(netto_str) if netto_str else None
+                    netto = float(netto_str) if netto_str.isdigit() or '.' in netto_str else None
 
                     current = {
                         "Nr": nr,
@@ -58,7 +61,7 @@ if uploaded_file is not None:
                     }
                     continue
 
-                # Hvis vi har current, legg til ekstra info (rabatt, ID osv.) til beskrivelse
+                # Hvis vi har current, legg til rabatt/ID/ordrelinje/baskvantitet til beskrivelse
                 if current and (line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line or "Baskvantitet:" in line):
                     current["Beskrivelse"] += " " + line.strip()
 
