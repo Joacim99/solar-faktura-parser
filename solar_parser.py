@@ -35,36 +35,63 @@ if uploaded_file is not None:
             current = None
 
             for line in lines:
-                # Ny varelinje: matcher "1 1355221 KABELSTIGE KHZSP-200 4M 8,00 m 656,00 25,00 % 842,30 NOK FZS"
-                # Fleksibel regex: Nr + Artikkelnr + beskrivelse + antall + enhet (valgfri) + a-pris + mva + netto NOK
-                match = re.match(r'^(\d+)\s+(\d+)\s+(.+?)\s+(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?\s+(\d+[.,]?\d*)\s+25,00 %\s+([\d\s,.]+)\s*NOK', line, re.I)
-                if match:
+                # Ny varelinje: starter med "1 " eller "2 " osv. etterfulgt av artikkelnr
+                nr_art_match = re.match(r'^(\d+)\s+(\d+)\s+(.*)', line)
+                if nr_art_match:
                     if current:
                         items.append(current)
 
-                    nr = match.group(1)
-                    artnr = match.group(2)
-                    desc = match.group(3).strip()
-                    antall_str = match.group(4).replace(",", ".")
-                    antall = float(antall_str)
-                    enhet = match.group(5).lower() if match.group(5) else "?"
-                    a_pris = match.group(6)
-                    netto_str = match.group(7).replace(" ", "").replace(",", ".")
-                    netto = float(netto_str)
+                    nr = nr_art_match.group(1)
+                    artnr = nr_art_match.group(2)
+                    rest = nr_art_match.group(3).strip()
 
                     current = {
                         "Nr": nr,
                         "Artikkelnr": artnr,
-                        "Beskrivelse": desc,
-                        "Antall": antall,
-                        "Enhet": enhet,
-                        "Nettobeløp": netto
+                        "Beskrivelse": rest,
+                        "Antall": None,
+                        "Enhet": "?",
+                        "Nettobeløp": None
                     }
+
+                    # Prøv å finne antall/enhet i samme linje (vanlig mønster)
+                    antall_match = re.search(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)\b', rest, re.I)
+                    if antall_match:
+                        current["Antall"] = float(antall_match.group(1).replace(",", "."))
+                        current["Enhet"] = antall_match.group(2).lower()
+
+                    # Nettobeløp i samme linje
+                    netto_match = re.search(r'([\d\s,.]+)\s*NOK', rest)
+                    if netto_match:
+                        val = netto_match.group(1).replace(" ", "").replace(",", ".")
+                        try:
+                            current["Nettobeløp"] = float(val)
+                        except:
+                            pass
+
                     continue
 
-                # Legg til ekstra info til beskrivelse (rabatt, ID, ordrelinje, baskvantitet)
-                if current and (line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line or "Baskvantitet:" in line):
-                    current["Beskrivelse"] += " " + line.strip()
+                if current:
+                    # Legg til ekstra info til beskrivelse
+                    if line.startswith(("Rabatt:", "Standard ID:", "Ordrelinjenummer:", "Baskvantitet:")):
+                        current["Beskrivelse"] += " " + line.strip()
+
+                    # Fallback: søk antall/enhet i ekstra linjer
+                    if current["Antall"] is None:
+                        antall_match = re.search(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)\b', line, re.I)
+                        if antall_match:
+                            current["Antall"] = float(antall_match.group(1).replace(",", "."))
+                            current["Enhet"] = antall_match.group(2).lower()
+
+                    # Fallback nettobeløp
+                    if current["Nettobeløp"] is None:
+                        netto_match = re.search(r'([\d\s,.]+)\s*NOK', line)
+                        if netto_match:
+                            val = netto_match.group(1).replace(" ", "").replace(",", ".")
+                            try:
+                                current["Nettobeløp"] = float(val)
+                            except:
+                                pass
 
             if current:
                 items.append(current)
