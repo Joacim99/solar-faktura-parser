@@ -8,7 +8,7 @@ st.set_page_config(page_title="Solar Faktura Parser (PDF)", layout="wide")
 
 st.title("Solar Faktura – Pris per enhet (PDF)")
 st.markdown("""
-Last opp Solar PDF-faktura. Appen parser teksten og finner varer med antall og nettobeløp.
+Last opp Solar PDF-faktura. Appen parser teksten og finner alle varer med riktig antall og nettobeløp.
 """)
 
 uploaded_file = st.file_uploader("Velg PDF-fil", type=["pdf"])
@@ -34,14 +34,8 @@ if uploaded_file is not None:
             items = []
             current = None
 
-            skip_patterns = ["Total", "Totalt", "Å betale", "Momspliktig", "MVA-beløp", "MVA-kode", "VAT"]
-
             for line in lines:
-                # Hopp over footer/totalsum-linjer
-                if any(p in line for p in skip_patterns):
-                    continue
-
-                # Ny varelinje: starter med Nr + artikkelnr
+                # Ny varelinje: starter med "1 " eller "2 " osv. etterfulgt av artikkelnr
                 nr_art_match = re.match(r'^(\d+)\s+(\d+)\s+(.*)', line)
                 if nr_art_match:
                     if current:
@@ -49,31 +43,25 @@ if uploaded_file is not None:
 
                     nr = nr_art_match.group(1)
                     artnr = nr_art_match.group(2)
-                    desc = nr_art_match.group(3).strip()
+                    rest = nr_art_match.group(3).strip()
 
                     current = {
                         "Nr": nr,
                         "Artikkelnr": artnr,
-                        "Beskrivelse": desc,
+                        "Beskrivelse": rest,
                         "Antall": None,
                         "Enhet": "?",
                         "Nettobeløp": None
                     }
 
-                    # Prøv å finne antall/enhet i samme linje (første treff)
-                    antall_matches = re.findall(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?', desc, re.I)
-                    if antall_matches:
-                        # Ta første rimelige antall (ikke rabattprosent eller pris)
-                        for amt, unit in antall_matches:
-                            amt_float = float(amt.replace(",", "."))
-                            if 0.1 < amt_float < 10000:  # rimelig filter
-                                current["Antall"] = amt_float
-                                if unit:
-                                    current["Enhet"] = unit.lower()
-                                break
+                    # Prøv å finne antall/enhet i samme linje (vanlig mønster)
+                    antall_match = re.search(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)\b', rest, re.I)
+                    if antall_match:
+                        current["Antall"] = float(antall_match.group(1).replace(",", "."))
+                        current["Enhet"] = antall_match.group(2).lower()
 
                     # Nettobeløp i samme linje
-                    netto_match = re.search(r'([\d\s,.]+)\s*NOK', desc)
+                    netto_match = re.search(r'([\d\s,.]+)\s*NOK', rest)
                     if netto_match:
                         val = netto_match.group(1).replace(" ", "").replace(",", ".")
                         try:
@@ -88,17 +76,12 @@ if uploaded_file is not None:
                     if line.startswith(("Rabatt:", "Standard ID:", "Ordrelinjenummer:", "Baskvantitet:")):
                         current["Beskrivelse"] += " " + line.strip()
 
-                    # Fallback antall/enhet i ekstra linjer
+                    # Fallback: søk antall/enhet i ekstra linjer
                     if current["Antall"] is None:
-                        antall_matches = re.findall(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?', line, re.I)
-                        if antall_matches:
-                            for amt, unit in antall_matches:
-                                amt_float = float(amt.replace(",", "."))
-                                if 0.1 < amt_float < 10000:
-                                    current["Antall"] = amt_float
-                                    if unit:
-                                        current["Enhet"] = unit.lower()
-                                    break
+                        antall_match = re.search(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)\b', line, re.I)
+                        if antall_match:
+                            current["Antall"] = float(antall_match.group(1).replace(",", "."))
+                            current["Enhet"] = antall_match.group(2).lower()
 
                     # Fallback nettobeløp
                     if current["Nettobeløp"] is None:
