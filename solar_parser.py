@@ -35,9 +35,8 @@ if uploaded_file is not None:
             current = None
 
             for line in lines:
-                # Ny varelinje: starter med "Nr" etterfulgt av artikkelnr og beskrivelse
-                # Eks: "1 1355221 KABELSTIGE KHZSP-200 4M 8,00 m 656,00 25,00 % 842,30 NOK FZS"
-                match = re.match(r'^(\d+)\s+(\d{6,})\s+(.+?)\s+(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?\s+(\d+[.,]?\d*)\s+25,00 %\s+([\d\s,.]+)\s*NOK', line, re.I)
+                # Ny varelinje: matcher "1 1355221 KABELSTIGE KHZSP-200 4M 8,00 m 656,00 25,00 % 842,30 NOK FZS"
+                match = re.match(r'^(\d+)\s+(\d+)\s+(.+?)\s+(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?\s+(\d+[.,]?\d*)\s+25,00 %\s+([\d\s,.]+)\s*NOK', line, re.I)
                 if match:
                     if current:
                         items.append(current)
@@ -45,11 +44,12 @@ if uploaded_file is not None:
                     nr = match.group(1)
                     artnr = match.group(2)
                     desc = match.group(3).strip()
-                    antall = float(match.group(4).replace(",", "."))
+                    antall_str = match.group(4).replace(",", ".")
+                    antall = float(antall_str)
                     enhet = match.group(5).lower() if match.group(5) else "?"
                     a_pris = match.group(6)
                     netto_str = match.group(7).replace(" ", "").replace(",", ".")
-                    netto = float(netto_str) if netto_str.isdigit() or '.' in netto_str else None
+                    netto = float(netto_str)
 
                     current = {
                         "Nr": nr,
@@ -61,7 +61,7 @@ if uploaded_file is not None:
                     }
                     continue
 
-                # Hvis vi har current, legg til rabatt/ID/ordrelinje/baskvantitet til beskrivelse
+                # Legg til ekstra info (rabatt, ID, etc.) til beskrivelse
                 if current and (line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line or "Baskvantitet:" in line):
                     current["Beskrivelse"] += " " + line.strip()
 
@@ -94,7 +94,7 @@ if uploaded_file is not None:
                 csv = df_result.to_csv(index=False).encode('utf-8-sig')
                 st.download_button("Last ned resultat som CSV", csv, "solar_priser.csv", "text/csv")
             else:
-                st.warning("Fant ingen gyldige linjer med antall + nettobeløp. Sjekk ekstrahert tekst over – mønsteret kan variere.")
+                st.warning("Fant ingen gyldige linjer. Sjekk ekstrahert tekst over – mønsteret kan variere.")
 
         except Exception as e:
             st.error(f"Feil under behandling: {str(e)}")
