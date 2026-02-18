@@ -1,148 +1,86 @@
-import streamlit as st
-import pandas as pd
-import re
-from io import BytesIO
-import pdfplumber
+# Inne i elif file_ext == 'pdf': blokken, erstatt fra "all_tables = []" og nedover med dette:
 
-# ------------------------------------------------------
-# APPENS HOVEDDEL
-# ------------------------------------------------------
-st.set_page_config(page_title="Solar Faktura Parser (PDF)", layout="wide")
+all_tables = []
+with pdfplumber.open(pdf_bytes) as pdf:
+    for page in pdf.pages:
+        tables = page.extract_tables()
+        if tables:
+            for table in tables:
+                # Prøv å bruke første rad som header
+                header = table[0] if table else None
+                df_table = pd.DataFrame(table[1:], columns=header)
+                all_tables.append(df_table)
 
-st.title("Solar Faktura – Pris per enhet (PDF-utgave)")
-st.markdown("""
-Last opp en Solar-faktura som PDF → appen prøver å finne alle varer og regne ut **nettobeløp ÷ antall**.  
-Den takler rotete strukturer med rabattlinjer og ekstra info.
-""")
+if all_tables:
+    df_raw = pd.concat(all_tables, ignore_index=True).fillna("")
 
-uploaded_file = st.file_uploader("Velg Solar PDF-fil", type=["pdf"])
+    # Debug: Vis rå ekstrahert tabell til deg
+    st.subheader("Rå ekstrahert tabell fra PDF (for feilsøking)")
+    st.dataframe(df_raw.head(20))
 
-if uploaded_file is not None:
-    with st.spinner("Leser og behandler PDF-filen..."):
-        try:
-            pdf_bytes = BytesIO(uploaded_file.read())
-            all_tables = []
+    # Fiks kolonnenavn manuelt hvis de er ødelagte
+    possible_cols = ["Nr", "Artikkelnr", "Beskrivelse", "Antall", "Enhet", "A-pris", "MVA-sats", "Nettobeløp"]
+    if len(df_raw.columns) >= len(possible_cols):
+        df_raw = df_raw.iloc[:, :len(possible_cols)]
+        df_raw.columns = possible_cols[:len(df_raw.columns)]
 
-            with pdfplumber.open(pdf_bytes) as pdf:
-                for page in pdf.pages:
-                    tables = page.extract_tables()
-                    if tables:
-                        for table in tables:
-                            # Gjør om tabell til DataFrame – bruk første rad som header hvis mulig
-                            df_table = pd.DataFrame(table[1:], columns=table[0] if table[0] else None)
-                            all_tables.append(df_table)
+    # Alternativt: Bruk posisjonsbasert hvis navn mangler
+    if "Antall" not in df_raw.columns:
+        if len(df_raw.columns) > 3:
+            df_raw["Antall"] = df_raw.iloc[:, 3]  # ofte 4. kolonne
+    if "Nettobeløp" not in df_raw.columns:
+        if len(df_raw.columns) > 7:
+            df_raw["Nettobeløp"] = df_raw.iloc[:, -1]  # ofte siste kolonne
 
-            if all_tables:
-                # Slå sammen alle tabeller fra alle sider
-                df_raw = pd.concat(all_tables, ignore_index=True).fillna("")
+    # Rense kolonner
+    if "Antall" in df_raw.columns:
+        df_raw["Antall"] = df_raw["Antall"].astype(str).str.replace(",", ".").str.extract(r'(\d+\.?\d*)', expand=False).astype(float, errors='ignore')
+    if "Nettobeløp" in df_raw.columns:
+        df_raw["Nettobeløp"] = df_raw["Nettobeløp"].astype(str).str.replace(" ", "").str.replace(",", ".").str.extract(r'(\d+\.?\d*)', expand=False).astype(float, errors='ignore')
 
-                # Fiks kolonnenavn hvis de er numeriske eller feil
-                if all(isinstance(col, int) or col is None for col in df_raw.columns):
-                    df_raw.columns = ["Nr", "Artikkelnr", "Beskrivelse", "Antall", "Enhet", "A-pris", "MVA-sats", "Nettobeløp"]
+    # ------------------------------------------------------
+    # Parsing-logikk – enklere versjon basert på kolonner
+    # ------------------------------------------------------
+    items = []
 
-                # Fiks kolonner med feil data (f.eks. tomme overskrifter)
-                df_raw = df_raw.rename(columns={None: ""})
+    for _, row in df_raw.iterrows():
+        nr = str(row.get("Nr", "")).strip()
+        if re.match(r'^\d+$', nr):  # Ny varelinje
+            antall = row.get("Antall", None)
+            netto_str = str(row.get("Nettobeløp", ""))
+            netto_match = re.search(r'([\d\s,.]+)', netto_str) if netto_str else None
 
-                # ------------------------------------------------------
-                # Parsing-logikk – tilpasset Solar-tabeller
-                # ------------------------------------------------------
-                items = []
-                current = None
-
-                for _, row in df_raw.iterrows():
-                    # Slå sammen alle kolonner til en streng for regex-søk
-                    row_text = " ".join(str(val).strip() for val in row if val)
-
-                    # Ny vare starter ofte med tall i "Nr"-kolonnen
-                    nr = str(row.get("Nr", "")).strip()
-                    if re.match(r'^\d+$', nr):
-                        if current:
-                            items.append(current)
-                        current = {
+            if antall is not None and netto_match:
+                try:
+                    antall_val = float(antall) if isinstance(antall, (int, float)) else float(antall)
+                    netto_val = float(netto_match.group(1).replace(" ", "").replace(",", "."))
+                    if antall_val > 0 and netto_val > 0:
+                        pris_enhet = round(netto_val / antall_val, 2)
+                        items.append({
                             "Nr": nr,
-                            "Beskrivelse": "",
-                            "Antall": None,
-                            "Enhet": "?",
-                            "Nettobeløp": None
-                        }
-
-                    if current:
-                        # Samle beskrivelse fra "Beskrivelse"-kolonnen eller hele raden
-                        desc = row.get("Beskrivelse", row_text).strip()
-                        if desc and not current["Beskrivelse"]:
-                            current["Beskrivelse"] = desc
-
-                        # Finn antall fra "Antall"-kolonnen eller regex i row_text
-                        antall_str = str(row.get("Antall", "")).strip()
-                        if antall_str and current["Antall"] is None:
-                            antall_str = antall_str.replace(",", ".")
-                            try:
-                                current["Antall"] = float(antall_str)
-                            except ValueError:
-                                pass  # Prøv regex som fallback
-
-                        if current["Antall"] is None:
-                            antall_match = re.search(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set)?', row_text, re.I)
-                            if antall_match:
-                                current["Antall"] = float(antall_match.group(1).replace(",", "."))
-                                if antall_match.group(2):
-                                    current["Enhet"] = antall_match.group(2).lower()
-
-                        # Finn nettobeløp fra "Nettobeløp"-kolonnen eller regex
-                        netto_str = str(row.get("Nettobeløp", "")).strip()
-                        if netto_str and "NOK" in netto_str:
-                            netto_val = re.search(r'([\d\s,.]+)\s*NOK', netto_str)
-                            if netto_val:
-                                val = netto_val.group(1).replace(" ", "").replace(",", ".")
-                                current["Nettobeløp"] = float(val)
-
-                # Ikke glem siste vare
-                if current:
-                    items.append(current)
-
-                # ------------------------------------------------------
-                # Lag resultat-tabell
-                # ------------------------------------------------------
-                result = []
-                for item in items:
-                    if item["Antall"] and item["Nettobeløp"] and item["Antall"] > 0:
-                        pris_enhet = round(item["Nettobeløp"] / item["Antall"], 2)
-                        result.append({
-                            "Nr": item["Nr"],
-                            "Beskrivelse": item.get("Beskrivelse", "–"),
-                            "Antall": item["Antall"],
-                            "Enhet": item["Enhet"],
-                            "Nettobeløp": item["Nettobeløp"],
+                            "Beskrivelse": row.get("Beskrivelse", "–"),
+                            "Antall": antall_val,
+                            "Enhet": row.get("Enhet", "?"),
+                            "Nettobeløp": netto_val,
                             "Pris per enhet": pris_enhet
                         })
+                except:
+                    pass  # Hopp over ugyldige rader
 
-                if result:
-                    df_result = pd.DataFrame(result)
-                    st.success(f"Fant {len(df_result)} varelinjer!")
-                    st.dataframe(df_result.style.format({
-                        "Nettobeløp": "{:,.2f} NOK",
-                        "Pris per enhet": "{:,.2f} NOK"
-                    }), use_container_width=True)
+    if items:
+        df_result = pd.DataFrame(items)
+        st.success(f"Fant {len(df_result)} gyldige varelinjer!")
+        st.dataframe(df_result.style.format({
+            "Nettobeløp": "{:,.2f} NOK",
+            "Pris per enhet": "{:,.2f} NOK"
+        }), use_container_width=True)
 
-                    # Nedlasting som CSV
-                    csv_buffer = BytesIO()
-                    df_result.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
-                    csv_buffer.seek(0)
-                    st.download_button(
-                        label="Last ned resultat som CSV",
-                        data=csv_buffer,
-                        file_name="solar_priser.csv",
-                        mime="text/csv"
-                    )
-                else:
-                    st.warning("Fant ingen gyldige varelinjer med både antall og nettobeløp. Prøv en annen PDF eller sjekk parsing.")
+        # CSV-nedlasting
+        csv = df_result.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("Last ned CSV", csv, "solar_priser.csv", "text/csv")
 
-            else:
-                st.warning("Fant ingen tabeller i PDF-en. Denne PDF-en kan være bildebasert – kontakt støtte for OCR-oppsett.")
+    else:
+        st.warning("Fant ingen linjer med gyldig antall + netto. Sjekk rå-tabellen over og se om kolonnene stemmer.")
 
-        except Exception as e:
-            st.error(f"Noe gikk galt under lesing/behandling: {str(e)}")
-            st.info("Prøv å laste opp fila på nytt, eller send feilmeldingen for hjelp.")
-
-st.markdown("---")
-st.caption("Laget med Streamlit og pdfplumber • PDF-utgave, februar 2026")
+else:
+    st.warning("Ingen tabeller ekstrahert fra PDF-en. Prøv pdfplumber med annen strategi eller send PDF for manuell sjekk.")
