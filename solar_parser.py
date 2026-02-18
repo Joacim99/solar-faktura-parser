@@ -26,8 +26,8 @@ if uploaded_file is not None:
                         full_text += text + "\n\n"
 
             # Debug: Vis ekstrahert tekst
-            st.subheader("Ekstrahert tekst fra PDF (første 4000 tegn)")
-            st.text(full_text[:4000] + "..." if len(full_text) > 4000 else full_text)
+            st.subheader("Ekstrahert tekst fra PDF (første 5000 tegn)")
+            st.text(full_text[:5000] + "..." if len(full_text) > 5000 else full_text)
 
             lines = [line.strip() for line in full_text.splitlines() if line.strip()]
 
@@ -36,6 +36,7 @@ if uploaded_file is not None:
 
             for line in lines:
                 # Ny varelinje: matcher "1 1355221 KABELSTIGE KHZSP-200 4M 8,00 m 656,00 25,00 % 842,30 NOK FZS"
+                # Fleksibel regex: Nr + Artikkelnr + beskrivelse + antall + enhet (valgfri) + a-pris + mva + netto NOK
                 match = re.match(r'^(\d+)\s+(\d+)\s+(.+?)\s+(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?\s+(\d+[.,]?\d*)\s+25,00 %\s+([\d\s,.]+)\s*NOK', line, re.I)
                 if match:
                     if current:
@@ -61,7 +62,7 @@ if uploaded_file is not None:
                     }
                     continue
 
-                # Legg til ekstra info (rabatt, ID, etc.) til beskrivelse
+                # Legg til ekstra info til beskrivelse (rabatt, ID, ordrelinje, baskvantitet)
                 if current and (line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line or "Baskvantitet:" in line):
                     current["Beskrivelse"] += " " + line.strip()
 
