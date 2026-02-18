@@ -8,25 +8,25 @@ st.set_page_config(page_title="Solar Faktura Parser (PDF)", layout="wide")
 
 st.title("Solar Faktura – Pris per enhet (PDF)")
 st.markdown("""
-Last opp Solar-faktura som PDF. Appen leser all tekst og parser varer automatisk.
+Last opp Solar-faktura som PDF. Appen parser teksten og finner varer, antall og nettobeløp.
 """)
 
 uploaded_file = st.file_uploader("Velg PDF-fil", type=["pdf"])
 
 if uploaded_file is not None:
-    with st.spinner("Leser PDF og parser tekst..."):
+    with st.spinner("Leser PDF og parser..."):
         try:
             pdf_bytes = BytesIO(uploaded_file.read())
             full_text = ""
 
             with pdfplumber.open(pdf_bytes) as pdf:
                 for page in pdf.pages:
-                    text = page.extract_text(layout=True)  # layout=True bevarer mellomrom bedre
+                    text = page.extract_text(layout=True)  # Bevarer mellomrom bedre
                     if text:
                         full_text += text + "\n\n"
 
-            # Debug: Vis ekstrahert tekst
-            st.subheader("Ekstrahert tekst fra PDF (første 4000 tegn)")
+            # Debug: Vis tekst
+            st.subheader("Ekstrahert tekst (første 4000 tegn)")
             st.text(full_text[:4000] + "..." if len(full_text) > 4000 else full_text)
 
             lines = [line.strip() for line in full_text.splitlines() if line.strip()]
@@ -38,43 +38,46 @@ if uploaded_file is not None:
             while i < len(lines):
                 line = lines[i]
 
-                # Ny varelinje: starter med Nr (1, 2, 3...) etterfulgt av artikkelnr
-                nr_match = re.match(r'^(\d+)\s+(\d{6,})\s+', line)
-                if nr_match:
+                # Ny vare: starter med Nr + artikkelnr (f.eks. "1 1355221 ...")
+                nr_art_match = re.match(r'^(\d+)\s+(\d{6,})\s+', line)
+                if nr_art_match:
                     if current:
                         items.append(current)
 
                     current = {
-                        "Nr": nr_match.group(1),
-                        "Artikkelnr": nr_match.group(2),
-                        "Beskrivelse": line[nr_match.end():].strip(),
+                        "Nr": nr_art_match.group(1),
+                        "Artikkelnr": nr_art_match.group(2),
+                        "Beskrivelse": line[nr_art_match.end():].strip(),
                         "Antall": None,
                         "Enhet": "?",
                         "Nettobeløp": None
                     }
-
                     i += 1
                     continue
 
                 if current:
-                    # Neste linje kan være rabatt eller fortsettelse av beskrivelse
-                    if line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line or "Baskvantitet:" in line:
-                        current["Beskrivelse"] += " " + line
-                    else:
-                        # Prøv å finne antall/enhet/netto i linjen
-                        antall_match = re.search(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs)?', line, re.I)
-                        if antall_match and current["Antall"] is None:
-                            current["Antall"] = float(antall_match.group(1).replace(",", "."))
-                            if antall_match.group(2):
-                                current["Enhet"] = antall_match.group(2).lower()
+                    # Fortsett beskrivelse hvis ikke rabatt eller totalsum
+                    if not line.startswith(("Rabatt:", "Standard ID:", "Ordrelinjenummer:", "Baskvantitet:")) and not "Total" in line and not "Å betale" in line:
+                        current["Beskrivelse"] += " " + line.strip()
 
-                        netto_match = re.search(r'([\d\s,.]+)\s*NOK', line)
-                        if netto_match and current["Nettobeløp"] is None:
-                            val = netto_match.group(1).replace(" ", "").replace(",", ".")
-                            try:
-                                current["Nettobeløp"] = float(val)
-                            except:
-                                pass
+                    # Antall + enhet (ser etter tall + enhet i linjen)
+                    antall_match = re.search(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)\b', line, re.I)
+                    if antall_match and current["Antall"] is None:
+                        current["Antall"] = float(antall_match.group(1).replace(",", "."))
+                        current["Enhet"] = antall_match.group(2).lower()
+
+                    # Nettobeløp
+                    netto_match = re.search(r'([\d\s,.]+)\s*NOK', line)
+                    if netto_match and current["Nettobeløp"] is None:
+                        val = netto_match.group(1).replace(" ", "").replace(",", ".")
+                        try:
+                            current["Nettobeløp"] = float(val)
+                        except:
+                            pass
+
+                    # Hvis rabatt eller ekstra info – legg til beskrivelse
+                    if line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line:
+                        current["Beskrivelse"] += " " + line.strip()
 
                 i += 1
 
@@ -107,11 +110,10 @@ if uploaded_file is not None:
                 csv = df_result.to_csv(index=False).encode('utf-8-sig')
                 st.download_button("Last ned resultat som CSV", csv, "solar_priser.csv", "text/csv")
             else:
-                st.warning("Fant ingen linjer med gyldig antall + nettobeløp. Sjekk ekstrahert tekst over.")
+                st.warning("Fant ingen gyldige linjer med antall + nettobeløp. Sjekk ekstrahert tekst over.")
 
         except Exception as e:
-            st.error(f"Feil: {str(e)}")
+            st.error(f"Feil under behandling: {str(e)}")
             st.info("Prøv på nytt eller send feilmeldingen.")
 
-st.caption("PDF-parser med tekst-ekstraksjon • Tilpasset Solar-layout • Hele fila sendes hver gang")
-
+st.caption("PDF-parser med tekstbasert parsing – tilpasset Solar • Hele fila sendes hver gang")
