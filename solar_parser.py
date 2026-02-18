@@ -26,17 +26,23 @@ if uploaded_file is not None:
                         full_text += text + "\n\n"
 
             # Debug: Vis ekstrahert tekst
-            st.subheader("Ekstrahert tekst fra PDF (første 6000 tegn)")
-            st.text(full_text[:6000] + "..." if len(full_text) > 6000 else full_text)
+            st.subheader("Ekstrahert tekst fra PDF (første 5000 tegn)")
+            st.text(full_text[:5000] + "..." if len(full_text) > 5000 else full_text)
 
             lines = [line.strip() for line in full_text.splitlines() if line.strip()]
 
             items = []
             current = None
 
+            skip_patterns = ["Total", "Totalt", "Å betale", "Momspliktig", "MVA-beløp", "MVA-kode", "VAT", "Solar Norge AS", "Faktura", "Leveringsadresse", "Kjøperens adresse"]
+
             for line in lines:
-                # Matcher hele varelinje: Nr + Artikkelnr + Beskrivelse + Antall + Enhet + A-pris + MVA + Netto NOK
-                # Fleksibel nok til å matche variasjoner i mellomrom og enhet
+                # Hopp over footer/totalsum
+                if any(p in line for p in skip_patterns):
+                    continue
+
+                # Matcher hele varelinje: Nr + Artikkelnr + beskrivelse + antall + enhet + a-pris + mva + netto NOK
+                # Fleksibel regex som ignorerer modell-tall som "4M"
                 match = re.match(r'^(\d+)\s+(\d+)\s+(.+?)\s+(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?\s+(\d+[.,]?\d*)\s+25,00 %\s+([\d\s,.]+)\s*NOK', line, re.I | re.DOTALL)
                 if match:
                     if current:
@@ -62,7 +68,7 @@ if uploaded_file is not None:
                     }
                     continue
 
-                # Legg til ekstra info (rabatt, ID, ordrelinje, baskvantitet) til beskrivelse
+                # Legg til ekstra info til beskrivelse
                 if current and (line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line or "Baskvantitet:" in line):
                     current["Beskrivelse"] += " " + line.strip()
 
