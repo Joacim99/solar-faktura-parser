@@ -72,7 +72,7 @@ if uploaded_file is not None:
                     if line.startswith("Rabatt:") or "Standard ID:" in line or "Ordrelinjenummer:" in line or "Baskvantitet:" in line:
                         current["Beskrivelse"] += " " + line.strip()
 
-                    # Fallback antall/enhet hvis ikke fanget i hovedlinjen
+                    # Fallback antall/enhet i ekstra linjer
                     if current["Antall"] is None:
                         antall_matches = re.findall(r'(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?', line, re.I)
                         if antall_matches:
