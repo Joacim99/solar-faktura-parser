@@ -8,7 +8,7 @@ st.set_page_config(page_title="Solar Faktura Parser (PDF)", layout="wide")
 
 st.title("Solar Faktura – Pris per enhet (PDF)")
 st.markdown("""
-Last opp Solar PDF-faktura. Appen parser teksten og finner varer med riktig antall og nettobeløp.
+Last opp Solar PDF-faktura. Appen parser teksten og finner alle varer med riktig antall og nettobeløp.
 """)
 
 uploaded_file = st.file_uploader("Velg PDF-fil", type=["pdf"])
@@ -35,8 +35,8 @@ if uploaded_file is not None:
             current = None
 
             for line in lines:
-                # Ny varelinje: Nr + Artikkelnr + beskrivelse + antall + enhet + a-pris + mva + netto NOK
-                # Fleksibel nok til å matche både "8,00 m" og "5,00 each"
+                # Ny varelinje: matcher Nr + Artikkelnr + beskrivelse + antall + enhet (valgfri) + a-pris + mva + netto NOK
+                # Fleksibel nok til å matche både "8,00 m" og "5,00 each", og ignorerer modell-tall som "4M"
                 match = re.match(r'^(\d+)\s+(\d+)\s+(.+?)\s+(\d+[.,]?\d*)\s*(m|each|stk|roll|set|pcs|pakke)?\s+(\d+[.,]?\d*)\s+25,00 %\s+([\d\s,.]+)\s*NOK', line, re.I)
                 if match:
                     if current:
@@ -101,4 +101,4 @@ if uploaded_file is not None:
             st.error(f"Feil under behandling: {str(e)}")
             st.info("Prøv på nytt eller send feilmeldingen.")
 
-st.caption("PDF-parser – tilpasset Solar-struktur • Hele fila sendes hver gang")
+st.caption("PDF-parser – tekstbasert, tilpasset Solar-struktur • Hele fila sendes hver gang")
